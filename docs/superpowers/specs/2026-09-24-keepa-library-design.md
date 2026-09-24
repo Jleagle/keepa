@@ -110,13 +110,13 @@ The API key is required, so it is a parameter. `NewClient` never fails.
 
 | Option | Default | Effect |
 |---|---|---|
-| `WithHTTPClient(*http.Client)` | `&http.Client{Timeout: 30s}` | Transport used for every request |
+| `WithHTTPClient(*http.Client)` | `&http.Client{}` | Transport used for every request. It carries no timeout of its own: every request gets a context deadline from `WithTimeout`, and a client-level timeout would silently cap the doubled best sellers deadline |
 | `WithBaseURL(string)` | `https://api.keepa.com` | Trailing slash is trimmed |
 | `WithLimiter(Limiter)` | none | Called before the token wait on every request |
 | `WithLogger(*slog.Logger)` | `slog.New(slog.DiscardHandler)` | Receives the events listed in section 9 |
 | `WithTokenCallback(func(TokenUpdate))` | none | Called once per Keepa envelope received, including error envelopes |
 | `WithTokenReserve(int)` | 20 | Tokens to keep in hand; the floor |
-| `WithTimeout(time.Duration)` | 60s | Fallback per-request deadline when the caller's context has none |
+| `WithTimeout(time.Duration)` | 60s | Fallback per-request deadline when the caller's context has none; zero or negative disables the fallback, as Go convention expects |
 
 ```go
 // Limiter is satisfied by *golang.org/x/time/rate.Limiter without importing it.
@@ -248,8 +248,10 @@ func (t CSVType) HasShipping() bool
 `CSV` keeps every named field the current package has, typed as `History`,
 in the same order, and keeps the positional decoder: `UnmarshalJSON` accepts
 `[][]int` where an entry may be `null`, and fills the fields by index. Series
-beyond the known range are ignored. A `Get(CSVType) History` accessor gives
-positional access without a switch.
+beyond the known range are ignored. `MarshalJSON` emits the same positional
+array (nil series as `null`) so a decoded product round-trips through
+`encoding/json`. A `Get(CSVType) History` accessor gives positional access
+without a switch.
 
 The BSON decoder is dropped. Nothing in price-spider persists `CSV`, and an
 open-source client must not depend on a database driver.
@@ -285,11 +287,14 @@ the JSON.
 3. If a `Limiter` is set, `Wait(ctx)`.
 4. Token wait or non-blocking check (section 10). Requests with cost 0 skip
    this step.
-5. If the context has no deadline, derive one from the client timeout.
+5. If the context has no deadline and the resolved timeout is positive,
+   derive one from it.
 6. Send the request. GET endpoints put everything in the query string; the
    deals endpoint POSTs a JSON body with `Content-Type: application/json`.
    The client never sets `Accept-Encoding`; Go's transport negotiates gzip
-   and decompresses transparently.
+   and decompresses transparently. A transport or URL error is rewrapped
+   without the request URL, which carries the API key, keeping the cause
+   available to `errors.Is`.
 7. Read the body and decode the envelope. The response is treated as a Keepa
    envelope when `Timestamp > 0 || RefillRate > 0`. This is checked before
    the status code, because a 429 carries the authoritative token counts.
@@ -300,7 +305,10 @@ the JSON.
    otherwise the next paid call would wait on a fictional empty bucket. If
    `Error` is set, return `*APIError` with the HTTP status filled in.
 9. If the status is not 200, return `*HTTPError`.
-10. Decode the typed response.
+10. If the status is 200 but the body is valid JSON that is not an envelope,
+    return an error naming the path; Keepa never answers that way, a proxy
+    might.
+11. Decode the typed response.
 
 **Logging events** (all through the configured `*slog.Logger`, with the
 `keepa:` prefix on messages):
@@ -327,7 +335,7 @@ type TokenState struct {
 	Left          int       // tokens at UpdatedAt
 	RefillRate    int       // tokens per minute
 	FlowReduction float64   // tokens per minute
-	UpdatedAt     time.Time // may be in the future when calls are queued
+	UpdatedAt     time.Time // in the future while calls are queued; Left is then the balance at that slot end after the queued spends
 }
 
 func (s TokenState) NetRefillRate() float64      // max(RefillRate - FlowReduction, 1)
@@ -341,28 +349,36 @@ func (c *Client) Tokens() TokenState
 ```
 projected = Left + minutes(now - UpdatedAt) * NetRefillRate     // negative minutes if UpdatedAt is in the future
 target    = C + R
-if projected >= target:
-    Left, UpdatedAt = projected - C, now                       // run immediately
+if projected >= target:                                        // run immediately
+    if UpdatedAt is in the future: Left -= C                   // the queue end stays where it is
+    else:                          Left, UpdatedAt = projected - C, now
 else:
-    wait      = (target - projected) / NetRefillRate minutes
-    Left, UpdatedAt = R, now + wait                            // reserve a future slot, then sleep
+    wait  = (target - projected) / NetRefillRate minutes
+    runAt = now + wait
+    if runAt is after UpdatedAt: Left, UpdatedAt = R, runAt    // this call becomes the queue end
+    else:                        Left -= C                     // it runs before the queue end
+    pending += C                                               // then sleep
 ```
 
-Reserving a future slot under the mutex means concurrent callers queue on a
-virtual timeline: each one waits for its own slot and they run at exactly the
-net refill rate once the floor is reached. If the context is cancelled during
-the sleep, the slot is refunded by moving `UpdatedAt` back by `C /
-NetRefillRate` minutes, but only if the slot is still in the future at cancel
-time and no envelope has re-synced the bucket since the reservation. The
-bucket keeps a generation counter that every recorded envelope increments;
-the reservation captures it and the refund compares it. A skipped refund
-merely under-spends until the next envelope, while a wrong refund would
-over-credit and risk a 429.
+The state `(Left, UpdatedAt)` always means "the balance at `UpdatedAt` after
+every reservation made so far". Reserving under the mutex means concurrent
+callers queue on a virtual timeline: each one waits for its own slot and they
+run at exactly the net refill rate once the floor is reached. `pending` is
+the summed cost of reservations still sleeping; it is released when a wait
+elapses and the request is about to be sent. If the context is cancelled
+during the sleep, `pending` is released and, if the slot is still in the
+future at cancel time, `Left` is credited back by `C`; once the slot has
+passed the tokens count as spent.
 
-**Sync on response.** Each envelope overwrites `Left`, `RefillRate` and
-`FlowReduction` with the server's values and moves `UpdatedAt` forward to
-`now` if it is not already in the future. This is the current package's
-behaviour and bounds projection drift to one call.
+**Sync on response.** Each envelope overwrites `RefillRate` and
+`FlowReduction`. If `UpdatedAt` is not in the future, `Left` becomes the
+server's `tokensLeft` and `UpdatedAt` moves to `now`. If calls are queued,
+the server's balance does not yet include their spends, so `Left` becomes
+`tokensLeft - pending + minutes(UpdatedAt - now) * NetRefillRate`, the
+balance at the slot end, and `UpdatedAt` stays. One approximation remains:
+requests already sent whose envelope has not returned are not subtracted;
+the window is one request's duration and that request's own envelope
+corrects it.
 
 **Reserve.** The client default is `WithTokenReserve`. Any call can override
 it with `WithReserve(n)`, so background work honours the floor while an
@@ -371,10 +387,12 @@ pay for it.
 
 **Seeding.** The first paid request on a client whose state is not `Known`
 first calls `GET /token` (cost 0), so the floor applies from the very first
-paid call. Seeding runs at most once concurrently: callers that arrive while
-a seed is in flight wait for it to finish, bounded by their own context, so a
-burst on a fresh client cannot slip past the reserve. A failed seed is logged
-at Warn and retried on the next paid call while the bucket is still unknown.
+paid call. The seed request runs in its own goroutine with the initiator's
+context stripped of cancellation (bounded by the fallback timeout), so one
+caller giving up cannot fail the seed for everyone; every caller, including
+the initiator, waits for it bounded by its own context, so a burst on a
+fresh client cannot slip past the reserve. A failed seed is logged at Warn
+and retried on the next paid call while the bucket is still unknown.
 Requests with cost 0 never seed, which is why the status call cannot recurse.
 `GetTokenStatus(ctx)` is also public for callers who want to inspect the
 bucket.
@@ -383,6 +401,9 @@ bucket.
 `*TokenWaitError` instead of sleeping, without reserving a slot. The error
 carries the wait the client would have performed, so a queue consumer can
 re-queue with that delay.
+
+**Callback.** The token callback runs synchronously on the goroutine that
+made the request, so it should return quickly.
 
 **Clock.** The client holds an unexported `now func() time.Time` so tests can
 drive projections deterministically. Sleeps use a real `time.Timer`; tests
