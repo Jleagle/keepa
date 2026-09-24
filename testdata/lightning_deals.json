@@ -1,0 +1,44 @@
+{
+  "timestamp": 1790277678673,
+  "tokensLeft": 700,
+  "tokensConsumed": 500,
+  "refillIn": 30000,
+  "refillRate": 20,
+  "tokenFlowReduction": 0,
+  "processingTimeInMs": 120,
+  "lightningDeals": [
+    {
+      "domainId": 1,
+      "lastUpdate": 7204320,
+      "asin": "B000000001",
+      "title": "Lightning One",
+      "sellerId": "ATVPDKIKX0DER",
+      "sellerName": "Amazon.com",
+      "dealId": "abc123",
+      "dealPrice": 1499,
+      "currentPrice": 1999,
+      "image": "51abc.jpg",
+      "isPrimeEligible": true,
+      "isFulfilledByAmazon": true,
+      "rating": 45,
+      "totalReviews": 1200,
+      "dealState": "AVAILABLE",
+      "startTime": 7204000,
+      "endTime": 7204600,
+      "percentClaimed": 40,
+      "percentOff": 25,
+      "variation": [{"dimension": "Size", "value": "L"}]
+    },
+    {
+      "domainId": 1,
+      "lastUpdate": 7204320,
+      "asin": "B000000002",
+      "title": "Upcoming",
+      "dealPrice": -1,
+      "currentPrice": 999,
+      "dealState": "WAITLIST",
+      "startTime": 7205000,
+      "endTime": 7205600
+    }
+  ]
+}
