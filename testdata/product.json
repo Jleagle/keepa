@@ -1,0 +1,55 @@
+{
+  "timestamp": 1790277678673,
+  "tokensLeft": 1195,
+  "tokensConsumed": 1,
+  "refillIn": 30000,
+  "refillRate": 20,
+  "tokenFlowReduction": 0,
+  "processingTimeInMs": 12,
+  "products": [
+    {
+      "asin": "B07XJ8C8F5",
+      "domainId": 1,
+      "title": "Test Product",
+      "brand": "Acme",
+      "trackingSince": 4000000,
+      "listedSince": 3900000,
+      "lastUpdate": 7204320,
+      "lastPriceChange": 7204000,
+      "lastRatingUpdate": 7204000,
+      "releaseDate": 20190801,
+      "publicationDate": -1,
+      "categories": [172282, 502394],
+      "rootCategory": 172282,
+      "categoryTree": [
+        {"catId": 172282, "name": "Electronics"},
+        {"catId": 502394, "name": "Camera & Photo"}
+      ],
+      "images": [
+        {"l": "51abc.jpg", "lH": 1000, "lW": 1000, "m": "51abc._SL500_.jpg", "mH": 500, "mW": 500}
+      ],
+      "variations": [
+        {"asin": "B07XJ8C8F6", "image": "51def.jpg", "attributes": [{"dimension": "Color", "value": "Black"}]}
+      ],
+      "videos": [
+        {"title": "Demo", "image": "vid.jpg", "duration": 30, "creator": "Acme", "name": "demo", "url": "https://example.com/v.mp4"}
+      ],
+      "csv": [[7200000, 1999, 7204320, 1899], [7200000, 1899], null, [7200000, 1234]],
+      "salesRanks": {"172282": [7200000, 1234]},
+      "stats": {
+        "current": [1899, 1899, -1, 1234],
+        "avg30": [1950, 1900, -1, 1300],
+        "min": [[7204320, 1899], null],
+        "max": [[7200000, 1999], null],
+        "lastOffersUpdate": 7204320,
+        "buyBoxPrice": 1899,
+        "buyBoxIsAmazon": true,
+        "buyBoxSellerId": "ATVPDKIKX0DER",
+        "totalOfferCount": 5
+      },
+      "reviews": {"lastUpdate": 7204000, "reviewCount": [7200000, 120], "ratingCount": [7200000, 400]},
+      "monthlySold": 500,
+      "hasReviews": true
+    }
+  ]
+}
