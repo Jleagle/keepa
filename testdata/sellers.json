@@ -1,0 +1,31 @@
+{
+  "timestamp": 1790277678673,
+  "tokensLeft": 1199,
+  "tokensConsumed": 1,
+  "refillIn": 30000,
+  "refillRate": 20,
+  "tokenFlowReduction": 0,
+  "processingTimeInMs": 8,
+  "sellers": {
+    "A2L77EE7U53NWQ": {
+      "sellerId": "A2L77EE7U53NWQ",
+      "sellerName": "Amazon Warehouse",
+      "domainId": 1,
+      "trackedSince": 4000000,
+      "lastUpdate": 7204320,
+      "hasFBA": true,
+      "isScammer": false,
+      "shipsFromChina": false,
+      "currentRating": 95,
+      "currentRatingCount": 10000,
+      "ratingsLast30Days": 120,
+      "csv": [[7200000, 94, 7204320, 95], [7200000, 9900, 7204320, 10000]],
+      "totalStorefrontAsins": [7204320, 1200],
+      "asinList": ["B000000001"],
+      "asinListLastSeen": [7204320],
+      "address": ["1 Example Street", "US"],
+      "sellerBrandStatistics": null,
+      "sellerCategoryStatistics": null
+    }
+  }
+}
