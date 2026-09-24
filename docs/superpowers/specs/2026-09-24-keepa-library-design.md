@@ -352,7 +352,12 @@ Reserving a future slot under the mutex means concurrent callers queue on a
 virtual timeline: each one waits for its own slot and they run at exactly the
 net refill rate once the floor is reached. If the context is cancelled during
 the sleep, the slot is refunded by moving `UpdatedAt` back by `C /
-NetRefillRate` minutes, provided it is still in the future.
+NetRefillRate` minutes, but only if the slot is still in the future at cancel
+time and no envelope has re-synced the bucket since the reservation. The
+bucket keeps a generation counter that every recorded envelope increments;
+the reservation captures it and the refund compares it. A skipped refund
+merely under-spends until the next envelope, while a wrong refund would
+over-credit and risk a 429.
 
 **Sync on response.** Each envelope overwrites `Left`, `RefillRate` and
 `FlowReduction` with the server's values and moves `UpdatedAt` forward to

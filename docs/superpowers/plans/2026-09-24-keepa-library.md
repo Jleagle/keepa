@@ -1739,7 +1739,7 @@ git -C /Users/jameseagle/code/Jleagle/keepa commit -m "Add client, option plumbi
 
 **Interfaces:**
 - Consumes: `Client`, `callParams`, `waitForTokens`, `APIError`, `HTTPError`, `truncate`.
-- Produces: `Envelope`; unexported `request{path, query, body, cost, timeout, callParams}`; `func (c *Client) query() url.Values`; `func do[T any](ctx context.Context, c *Client, r request) (*T, error)`; `func (c *Client) recordEnvelope(env *Envelope, path string)`; test helpers `newTestClient`, `recorder` (`Calls`, `Paths`, `Last`, `SetTokenHandler`), `okEnvelope`, `tokenFixture`, `serveJSON`, `serveFixture`, `probe`.
+- Produces: `Envelope`; unexported `request{path, query, body, cost, timeout, callParams}`; `func (c *Client) query() url.Values`; `func do[T any](ctx context.Context, c *Client, r request) (*T, error)`; `func (c *Client) recordEnvelope(env *Envelope, path string)` (which increments `tokenBucket.generation`, the counter Task 5's refund guard compares); test helpers `newTestClient`, `recorder` (`Calls`, `Paths`, `Last`, `SetTokenHandler`), `okEnvelope`, `tokenFixture`, `serveJSON`, `serveFixture`, `probe`.
 
 - [ ] **Step 1: Write the test helpers**
 
@@ -2299,6 +2299,8 @@ Append to `tokens.go`:
 
 ```go
 // recordEnvelope syncs the bucket with an envelope and notifies the callback.
+// It bumps the bucket generation so a queued call cancelled after this point
+// does not refund its slot against the fresh reading.
 func (c *Client) recordEnvelope(env *Envelope, path string) {
 	now := c.now()
 	c.tokens.mu.Lock()
@@ -2310,6 +2312,7 @@ func (c *Client) recordEnvelope(env *Envelope, path string) {
 	if now.After(s.UpdatedAt) {
 		s.UpdatedAt = now
 	}
+	c.tokens.generation++
 	c.tokens.mu.Unlock()
 
 	if c.onTokens != nil {
