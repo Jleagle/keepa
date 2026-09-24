@@ -1,0 +1,13 @@
+{
+  "timestamp": 1790277678673,
+  "tokensLeft": 1190,
+  "tokensConsumed": 10,
+  "refillIn": 30000,
+  "refillRate": 20,
+  "tokenFlowReduction": 0,
+  "processingTimeInMs": 60,
+  "products": [
+    {"asin": "B000000001", "title": "Found One", "domainId": 1, "lastUpdate": 7204320}
+  ],
+  "asinList": ["B000000001", "B000000002"]
+}
