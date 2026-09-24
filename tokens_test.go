@@ -39,7 +39,7 @@ func TestTokenStateProjected(t *testing.T) {
 
 func TestReserveTokensRunsWhenPlentiful(t *testing.T) {
 	c := bucketClient(TokenState{Known: true, Left: 100, RefillRate: 10, UpdatedAt: testNow})
-	wait, err := c.reserveTokens(30, 20, false)
+	wait, _, err := c.reserveTokens(30, 20, false)
 	if err != nil || wait != 0 {
 		t.Fatalf("reserveTokens = %v, %v; want 0, nil", wait, err)
 	}
@@ -51,7 +51,7 @@ func TestReserveTokensRunsWhenPlentiful(t *testing.T) {
 func TestReserveTokensWaitsToKeepReserve(t *testing.T) {
 	// 30 in hand, need 30 + 20 reserve = 50, refill 10/min: two minutes.
 	c := bucketClient(TokenState{Known: true, Left: 30, RefillRate: 10, UpdatedAt: testNow})
-	wait, err := c.reserveTokens(30, 20, false)
+	wait, _, err := c.reserveTokens(30, 20, false)
 	if err != nil || wait != 2*time.Minute {
 		t.Fatalf("reserveTokens = %v, %v; want 2m, nil", wait, err)
 	}
@@ -63,7 +63,7 @@ func TestReserveTokensWaitsToKeepReserve(t *testing.T) {
 func TestReserveTokensProjectsRefill(t *testing.T) {
 	// Seen empty three minutes ago at 10/min: 30 projected, which covers cost 10 + reserve 20 exactly.
 	c := bucketClient(TokenState{Known: true, Left: 0, RefillRate: 10, UpdatedAt: testNow.Add(-3 * time.Minute)})
-	wait, err := c.reserveTokens(10, 20, false)
+	wait, _, err := c.reserveTokens(10, 20, false)
 	if err != nil || wait != 0 {
 		t.Fatalf("reserveTokens = %v, %v; want 0, nil", wait, err)
 	}
@@ -75,7 +75,7 @@ func TestReserveTokensProjectsRefill(t *testing.T) {
 func TestReserveTokensUsesNetRefillRate(t *testing.T) {
 	// 10/min minus 4/min tracking: 6/min. 20 short at 6/min is 200 seconds.
 	c := bucketClient(TokenState{Known: true, Left: 30, RefillRate: 10, FlowReduction: 4, UpdatedAt: testNow})
-	wait, _ := c.reserveTokens(30, 20, false)
+	wait, _, _ := c.reserveTokens(30, 20, false)
 	if wait != 200*time.Second {
 		t.Errorf("wait = %v, want 3m20s", wait)
 	}
@@ -85,8 +85,8 @@ func TestReserveTokensQueuesConcurrentCallers(t *testing.T) {
 	// At the floor with 20 in hand and 60/min refill, two calls of 60 each:
 	// the first waits one minute, the second queues behind it and waits two.
 	c := bucketClient(TokenState{Known: true, Left: 20, RefillRate: 60, UpdatedAt: testNow})
-	w1, _ := c.reserveTokens(60, 20, false)
-	w2, _ := c.reserveTokens(60, 20, false)
+	w1, _, _ := c.reserveTokens(60, 20, false)
+	w2, _, _ := c.reserveTokens(60, 20, false)
 	if w1 != time.Minute || w2 != 2*time.Minute {
 		t.Errorf("waits = %v, %v; want 1m, 2m", w1, w2)
 	}
@@ -97,7 +97,7 @@ func TestReserveTokensQueuesConcurrentCallers(t *testing.T) {
 
 func TestReserveTokensWithoutWaiting(t *testing.T) {
 	c := bucketClient(TokenState{Known: true, Left: 30, RefillRate: 10, UpdatedAt: testNow})
-	_, err := c.reserveTokens(30, 20, true)
+	_, _, err := c.reserveTokens(30, 20, true)
 	werr, ok := errors.AsType[*TokenWaitError](err)
 	if !ok {
 		t.Fatalf("expected *TokenWaitError, got %T: %v", err, err)
@@ -115,11 +115,11 @@ func TestReserveTokensWithoutWaiting(t *testing.T) {
 
 func TestReserveTokensUnknownStateOrZeroCost(t *testing.T) {
 	c := bucketClient(TokenState{})
-	if wait, err := c.reserveTokens(500, 1000, true); wait != 0 || err != nil {
+	if wait, _, err := c.reserveTokens(500, 1000, true); wait != 0 || err != nil {
 		t.Errorf("unknown state must run immediately: %v %v", wait, err)
 	}
 	c = bucketClient(TokenState{Known: true, Left: 0, RefillRate: 10, UpdatedAt: testNow})
-	if wait, err := c.reserveTokens(0, 1000, true); wait != 0 || err != nil {
+	if wait, _, err := c.reserveTokens(0, 1000, true); wait != 0 || err != nil {
 		t.Errorf("cost 0 must run immediately: %v %v", wait, err)
 	}
 	if s := c.Tokens(); s.Left != 0 {
@@ -130,10 +130,11 @@ func TestReserveTokensUnknownStateOrZeroCost(t *testing.T) {
 func TestRefundTokensRestoresProjection(t *testing.T) {
 	c := bucketClient(TokenState{Known: true, Left: 30, RefillRate: 10, UpdatedAt: testNow})
 	before := c.Tokens().Projected(testNow)
-	if _, err := c.reserveTokens(30, 20, false); err != nil {
+	_, gen, err := c.reserveTokens(30, 20, false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	c.refundTokens(30, testNow)
+	c.refundTokens(30, gen)
 	if after := c.Tokens().Projected(testNow); after != before {
 		t.Errorf("projection after refund = %v, want %v", after, before)
 	}
@@ -141,9 +142,42 @@ func TestRefundTokensRestoresProjection(t *testing.T) {
 
 func TestRefundTokensSkipsWhenNothingReserved(t *testing.T) {
 	c := bucketClient(TokenState{Known: true, Left: 30, RefillRate: 10, UpdatedAt: testNow})
-	c.refundTokens(30, testNow)
+	c.refundTokens(30, c.tokens.generation)
 	if s := c.Tokens(); !s.UpdatedAt.Equal(testNow) {
 		t.Errorf("refund moved a timeline that was not in the future: %v", s.UpdatedAt)
+	}
+}
+
+func TestRefundTokensSkipsAfterResync(t *testing.T) {
+	// An envelope arriving during the sleep bumps the generation; the
+	// cancelled call must not refund against the server's fresh reading.
+	c := bucketClient(TokenState{Known: true, Left: 30, RefillRate: 10, UpdatedAt: testNow})
+	_, gen, err := c.reserveTokens(30, 20, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.tokens.mu.Lock()
+	c.tokens.generation++
+	c.tokens.state.Left = 500 // what an envelope would write
+	c.tokens.mu.Unlock()
+	c.refundTokens(30, gen)
+	if s := c.Tokens(); s.Left != 500 || !s.UpdatedAt.Equal(testNow.Add(2*time.Minute)) {
+		t.Errorf("refund applied after a resync: %+v", s)
+	}
+}
+
+func TestRefundTokensSkipsWhenSlotHasPassed(t *testing.T) {
+	// If the clock has moved past the reserved slot by cancel time, the
+	// tokens are treated as spent and nothing is refunded.
+	c := bucketClient(TokenState{Known: true, Left: 30, RefillRate: 10, UpdatedAt: testNow})
+	_, gen, err := c.reserveTokens(30, 20, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.now = func() time.Time { return testNow.Add(3 * time.Minute) }
+	c.refundTokens(30, gen)
+	if s := c.Tokens(); !s.UpdatedAt.Equal(testNow.Add(2 * time.Minute)) {
+		t.Errorf("refund moved a slot that had already passed: %v", s.UpdatedAt)
 	}
 }
 
