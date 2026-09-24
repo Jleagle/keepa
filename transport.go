@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,24 +70,26 @@ func do[T any](ctx context.Context, c *Client, r request) (*T, error) {
 		if timeout == 0 {
 			timeout = c.timeout
 		}
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
 	}
 
 	req, err := c.newRequest(ctx, r)
 	if err != nil {
-		return nil, err
+		return nil, redactURLError(err, r.path)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, redactURLError(err, r.path)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("keepa: reading %s response: %w", r.path, err)
 	}
 
 	// The envelope is read before the status check: an error response,
@@ -117,6 +120,9 @@ func do[T any](ctx context.Context, c *Client, r request) (*T, error) {
 	if decodeErr != nil {
 		return nil, fmt.Errorf("keepa: decoding %s response: %w", r.path, decodeErr)
 	}
+	if !env.isEnvelope() {
+		return nil, fmt.Errorf("keepa: %s response is not a Keepa envelope", r.path)
+	}
 
 	var out T
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -140,4 +146,14 @@ func (c *Client) newRequest(ctx context.Context, r request) (*http.Request, erro
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return req, nil
+}
+
+// redactURLError strips the request URL, which carries the API key, from a
+// net/http or URL-parsing error while keeping the cause wrapped for errors.Is.
+func redactURLError(err error, path string) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return fmt.Errorf("keepa: %s %s: %w", uerr.Op, path, uerr.Err)
+	}
+	return fmt.Errorf("keepa: %s: %w", path, err)
 }

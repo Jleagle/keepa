@@ -42,6 +42,9 @@ func TestNewClientDefaults(t *testing.T) {
 	if c.httpClient == nil || c.logger == nil || c.now == nil {
 		t.Error("httpClient, logger and now must have defaults")
 	}
+	if c.httpClient.Timeout != 0 {
+		t.Errorf("default http client timeout = %v, want none", c.httpClient.Timeout)
+	}
 	if c.limiter != nil || c.onTokens != nil {
 		t.Error("limiter and callback default to nil")
 	}

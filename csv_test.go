@@ -121,3 +121,36 @@ func TestCSVTypeStringAndValid(t *testing.T) {
 		t.Errorf("csvTypeCount = %d, want 36", csvTypeCount)
 	}
 }
+
+func TestCSVRoundTrip(t *testing.T) {
+	var c CSV
+	if err := json.Unmarshal([]byte(`[[1,100,2,200],null,[3,300]]`), &c); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back CSV
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(back.Amazon, History{1, 100, 2, 200}) || back.New != nil || !slices.Equal(back.Used, History{3, 300}) {
+		t.Errorf("round trip: amazon=%v new=%v used=%v (json %s)", back.Amazon, back.New, back.Used, b)
+	}
+	if pb, err := json.Marshal(&c); err != nil || string(pb) != string(b) {
+		t.Errorf("*CSV marshals differently: %s, %v", pb, err)
+	}
+
+	empty, err := json.Marshal(CSV{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nulls []any
+	if err := json.Unmarshal(empty, &nulls); err != nil {
+		t.Fatal(err)
+	}
+	if len(nulls) != 36 || slices.ContainsFunc(nulls, func(v any) bool { return v != nil }) {
+		t.Errorf("empty CSV = %s, want 36 nulls", empty)
+	}
+}

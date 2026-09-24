@@ -259,3 +259,43 @@ func TestDoHonoursPerCallReserve(t *testing.T) {
 		t.Errorf("WithReserve(0) should let the call through: %v", err)
 	}
 }
+
+func TestDoRedactsAPIKeyFromErrors(t *testing.T) {
+	c := NewClient("test-key", WithBaseURL("http://127.0.0.1:1")) // nothing listens on port 1
+	c.now = func() time.Time { return testNow }
+	c.tokens.state = TokenState{Known: true, Left: 1200, RefillRate: 20, UpdatedAt: testNow}
+	_, err := probe(t.Context(), c, request{cost: 1})
+	if err == nil {
+		t.Fatal("expected a connection error")
+	}
+	if !strings.HasPrefix(err.Error(), "keepa: ") {
+		t.Errorf("err = %q, want the keepa: prefix", err)
+	}
+	if strings.Contains(err.Error(), "test-key") {
+		t.Errorf("err leaks the API key: %q", err)
+	}
+}
+
+func TestDoZeroTimeoutDisablesFallback(t *testing.T) {
+	slow := func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(50 * time.Millisecond)
+		serveJSON(200, okEnvelope(""))(w, r)
+	}
+	c, _ := newTestClient(t, slow, WithTimeout(0))
+	c.tokens.state = TokenState{Known: true, Left: 1200, RefillRate: 20, UpdatedAt: testNow}
+	if _, err := probe(context.Background(), c, request{cost: 1}); err != nil {
+		t.Errorf("WithTimeout(0) must not impose a deadline: %v", err)
+	}
+}
+
+func TestDoRejects200WithoutEnvelope(t *testing.T) {
+	c, _ := newTestClient(t, serveJSON(200, `{}`))
+	c.tokens.state = TokenState{Known: true, Left: 1200, RefillRate: 20, UpdatedAt: testNow}
+	_, err := probe(t.Context(), c, request{cost: 1})
+	if err == nil || !strings.Contains(err.Error(), "not a Keepa envelope") {
+		t.Fatalf("err = %v, want a not-an-envelope error", err)
+	}
+	if s := c.Tokens(); s.Left != 1199 || s.RefillRate != 20 || !s.UpdatedAt.Equal(testNow) {
+		t.Errorf("bucket changed beyond the reservation: %+v", s)
+	}
+}

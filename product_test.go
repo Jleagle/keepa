@@ -1,6 +1,7 @@
 package keepa
 
 import (
+	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
@@ -166,6 +167,19 @@ func TestGetProductsDecodes(t *testing.T) {
 	}
 	if p.MonthlySold != 500 || !p.HasReviews {
 		t.Errorf("monthlySold=%d hasReviews=%v", p.MonthlySold, p.HasReviews)
+	}
+
+	// A decoded product round-trips through encoding/json.
+	b, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Product
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(back.CSV.Amazon, p.CSV.Amazon) || back.Stats == nil || !slices.Equal(back.Stats.Current, p.Stats.Current) {
+		t.Errorf("round trip: amazon=%v stats=%+v", back.CSV.Amazon, back.Stats)
 	}
 }
 

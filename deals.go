@@ -60,9 +60,9 @@ func WithDealsSort(s DealsSort) DealsOption {
 }
 
 // WithDealsDeltaLastRange keeps deals whose last price change, in the
-// smallest currency unit, lies between min and max.
-func WithDealsDeltaLastRange(min, max int) DealsOption {
-	return dealsOption(func(p *dealsParams) { p.deltaLast = &[2]int{min, max} })
+// smallest currency unit, lies between lo and hi.
+func WithDealsDeltaLastRange(lo, hi int) DealsOption {
+	return dealsOption(func(p *dealsParams) { p.deltaLast = &[2]int{lo, hi} })
 }
 
 // GetDeals browses recent price changes for one price type. Keepa requires

@@ -39,22 +39,22 @@ type SellersResponse struct {
 
 // Seller is a Keepa marketplace seller object.
 type Seller struct {
-	Address                  []string `json:"address"`            // business address lines, country code last
-	ASINList                 []string `json:"asinList"`           // storefront ASINs, when requested
-	ASINListLastSeen         []Time   `json:"asinListLastSeen"`   // parallel to ASINList
-	CSV                      [][]int  `json:"csv"`                // 0: rating percentage history, 1: rating count history
-	CurrentRating            int      `json:"currentRating"`      // percentage
-	CurrentRatingCount       int      `json:"currentRatingCount"` // lifetime ratings
-	DomainID                 int      `json:"domainId"`
-	HasFBA                   bool     `json:"hasFBA"`
-	IsScammer                bool     `json:"isScammer"`
-	LastUpdate               Time     `json:"lastUpdate"`
-	RatingsLast30Days        int      `json:"ratingsLast30Days"`
-	SellerBrandStatistics    any      `json:"sellerBrandStatistics"`
-	SellerCategoryStatistics any      `json:"sellerCategoryStatistics"`
-	SellerID                 string   `json:"sellerId"`
-	SellerName               string   `json:"sellerName"`
-	ShipsFromChina           bool     `json:"shipsFromChina"`
-	TotalStorefrontAsins     []int    `json:"totalStorefrontAsins"` // [Keepa minutes, count]
-	TrackedSince             Time     `json:"trackedSince"`
+	Address                  []string  `json:"address"`            // business address lines, country code last
+	ASINList                 []string  `json:"asinList"`           // storefront ASINs, when requested
+	ASINListLastSeen         []Time    `json:"asinListLastSeen"`   // parallel to ASINList
+	CSV                      []History `json:"csv"`                // 0: rating percentage history, 1: rating count history
+	CurrentRating            int       `json:"currentRating"`      // percentage
+	CurrentRatingCount       int       `json:"currentRatingCount"` // lifetime ratings
+	DomainID                 int       `json:"domainId"`
+	HasFBA                   bool      `json:"hasFBA"`
+	IsScammer                bool      `json:"isScammer"`
+	LastUpdate               Time      `json:"lastUpdate"`
+	RatingsLast30Days        int       `json:"ratingsLast30Days"`
+	SellerBrandStatistics    any       `json:"sellerBrandStatistics"`
+	SellerCategoryStatistics any       `json:"sellerCategoryStatistics"`
+	SellerID                 string    `json:"sellerId"`
+	SellerName               string    `json:"sellerName"`
+	ShipsFromChina           bool      `json:"shipsFromChina"`
+	TotalStorefrontAsins     []int     `json:"totalStorefrontAsins"` // [Keepa minutes, count]
+	TrackedSince             Time      `json:"trackedSince"`
 }

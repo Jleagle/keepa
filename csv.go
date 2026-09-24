@@ -160,6 +160,17 @@ func (c *CSV) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON encodes the series positionally, as Keepa does, so a decoded
+// value round-trips through encoding/json.
+func (c CSV) MarshalJSON() ([]byte, error) {
+	fields := c.fields()
+	out := make([]History, len(fields))
+	for i, f := range fields {
+		out[i] = *f
+	}
+	return json.Marshal(out)
+}
+
 // Get returns the series for t, or nil when t is not valid.
 func (c *CSV) Get(t CSVType) History {
 	if !t.Valid() {

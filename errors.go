@@ -59,7 +59,7 @@ type TokenWaitError struct {
 
 func (e *TokenWaitError) Error() string {
 	return fmt.Sprintf("keepa: call costing %d tokens would wait %s to keep %d in reserve (%.0f projected)",
-		e.Cost, e.Wait.Round(time.Second), e.Reserve, e.Projected)
+		e.Cost, e.Wait.Round(time.Millisecond), e.Reserve, e.Projected)
 }
 
 // Is reports ErrWouldWait.

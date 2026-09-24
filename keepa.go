@@ -38,7 +38,8 @@ type Client struct {
 // Option configures a Client.
 type Option func(*Client)
 
-// WithHTTPClient sets the transport. The default has a 30 second timeout.
+// WithHTTPClient sets the transport. The default has no timeout of its own;
+// every request carries a context deadline, see WithTimeout.
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.httpClient = h } }
 
 // WithBaseURL points the client at another server, for example a test server.
@@ -51,7 +52,8 @@ func WithLimiter(l Limiter) Option { return func(c *Client) { c.limiter = l } }
 func WithLogger(l *slog.Logger) Option { return func(c *Client) { c.logger = l } }
 
 // WithTokenCallback is invoked for every Keepa envelope received, including
-// error envelopes, with the token counts it carried.
+// error envelopes, with the token counts it carried. It runs synchronously on
+// the goroutine that made the request, so it should return quickly.
 func WithTokenCallback(fn func(TokenUpdate)) Option { return func(c *Client) { c.onTokens = fn } }
 
 // WithTokenReserve sets the number of tokens the client keeps in hand. A call
@@ -60,7 +62,9 @@ func WithTokenCallback(fn func(TokenUpdate)) Option { return func(c *Client) { c
 func WithTokenReserve(n int) Option { return func(c *Client) { c.reserve = n } }
 
 // WithTimeout sets the deadline applied to a request whose context has none.
-// The default is one minute; best sellers uses double.
+// The default is one minute; best sellers uses double. Zero or a negative
+// value disables the fallback, leaving requests bounded only by the caller's
+// context and the HTTP client.
 func WithTimeout(d time.Duration) Option { return func(c *Client) { c.timeout = d } }
 
 // NewClient returns a client for the given API key.
@@ -68,7 +72,7 @@ func NewClient(apiKey string, opts ...Option) *Client {
 	c := &Client{
 		apiKey:     apiKey,
 		baseURL:    defaultBaseURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{},
 		logger:     slog.New(slog.DiscardHandler),
 		reserve:    defaultTokenReserve,
 		timeout:    defaultTimeout,

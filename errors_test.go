@@ -62,6 +62,10 @@ func TestTokenWaitErrorIsWouldWait(t *testing.T) {
 			t.Errorf("Error() = %q, missing %q", got, want)
 		}
 	}
+	short := &TokenWaitError{Wait: 250*time.Millisecond + 400*time.Microsecond}
+	if got := short.Error(); !strings.Contains(got, "wait 250ms ") {
+		t.Errorf("sub-second wait should round to the millisecond: %q", got)
+	}
 }
 
 func TestInvalidRequest(t *testing.T) {

@@ -75,7 +75,7 @@ func TestGetSellersDecodes(t *testing.T) {
 	if s.CurrentRating != 95 || s.CurrentRatingCount != 10000 || s.RatingsLast30Days != 120 {
 		t.Errorf("ratings = %+v", s)
 	}
-	if len(s.CSV) != 2 || !slices.Equal(s.CSV[1], []int{7200000, 9900, 7204320, 10000}) {
+	if len(s.CSV) != 2 || !slices.Equal(s.CSV[1], History{7200000, 9900, 7204320, 10000}) {
 		t.Errorf("csv = %v", s.CSV)
 	}
 	if !slices.Equal(s.TotalStorefrontAsins, []int{7204320, 1200}) || !slices.Equal(s.ASINList, []string{"B000000001"}) || !slices.Equal(s.Address, []string{"1 Example Street", "US"}) {

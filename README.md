@@ -56,19 +56,20 @@ for _, p := range resp.Products {
 | `GetSellers` | domain, seller IDs (1 to 100) | | 1 per seller |
 | `GetTokenStatus` | | | 0 |
 
-Options default to Keepa's own defaults, meaning the parameter is not sent.
+Options default to Keepa's own defaults, meaning the parameter is not sent,
+except `parents` and `page`, which Keepa requires and are always sent.
 
 ## Client options
 
 | Option | Default |
 |---|---|
-| `WithHTTPClient(*http.Client)` | 30 second timeout |
+| `WithHTTPClient(*http.Client)` | no timeout of its own; each request carries a deadline (see `WithTimeout`) |
 | `WithBaseURL(string)` | `https://api.keepa.com` |
 | `WithLimiter(Limiter)` | none; `*rate.Limiter` from `golang.org/x/time/rate` fits |
 | `WithLogger(*slog.Logger)` | discard |
 | `WithTokenCallback(func(TokenUpdate))` | none; called for every Keepa envelope, including errors |
 | `WithTokenReserve(int)` | 20 |
-| `WithTimeout(time.Duration)` | 1 minute, applied only when your context has no deadline |
+| `WithTimeout(time.Duration)` | 1 minute, applied only when your context has no deadline; 0 disables it |
 
 ## Token accounting
 
@@ -88,7 +89,18 @@ until the surplus is spent. Concurrent callers queue on a shared timeline.
   `ErrWouldWait`) with the wait it would have performed, so a queue consumer
   can re-queue instead of blocking.
 - The first paid call fetches `GetTokenStatus` (free) so the floor applies
-  immediately. `client.Tokens()` returns the current projection.
+  immediately. `client.Tokens()` returns a snapshot of the bucket;
+  `Tokens().Projected(time.Now())` is the current estimate.
+
+## Errors
+
+- `*APIError`: the error Keepa put in the response envelope, with `Type`, `Message` and `StatusCode`; matches `ErrNotEnoughTokens` on a 429.
+- `*HTTPError`: a non-200 response that was not a Keepa envelope, with `StatusCode` and `Body`.
+- `*TokenWaitError`: a `WithoutWaiting()` call that would have slept, with `Wait`; matches `ErrWouldWait`.
+- `ErrInvalidRequest`: wraps every argument validation failure, returned before any request is sent.
+
+The client never logs or returns your API key: transport errors have the
+request URL stripped.
 
 ## Working with history
 
