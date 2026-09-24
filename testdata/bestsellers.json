@@ -1,0 +1,16 @@
+{
+  "timestamp": 1790277678673,
+  "tokensLeft": 1150,
+  "tokensConsumed": 50,
+  "refillIn": 30000,
+  "refillRate": 20,
+  "tokenFlowReduction": 0,
+  "processingTimeInMs": 40,
+  "bestSellersList": {
+    "domainId": 1,
+    "lastUpdate": 7204320,
+    "categoryId": 172282,
+    "asinList": ["B000000001", "B000000002"]
+  },
+  "asinList": ["B000000001", "B000000002", "B000000003"]
+}
