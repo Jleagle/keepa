@@ -68,20 +68,20 @@ func TestGetBestSellersCost(t *testing.T) {
 }
 
 func TestGetBestSellersDoublesTimeout(t *testing.T) {
-	// With a 30ms client timeout, a 45ms response succeeds only because
-	// best sellers doubles the fallback deadline.
+	// With a 100ms client timeout, a 130ms response succeeds only because
+	// best sellers doubles the fallback deadline to 200ms.
 	slow := func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-time.After(45 * time.Millisecond):
+		case <-time.After(130 * time.Millisecond):
 		}
 		serveJSON(200, okEnvelope(`"asinList":[]`))(w, r)
 	}
-	c, _ := newTestClient(t, slow, WithTimeout(30*time.Millisecond))
+	c, _ := newTestClient(t, slow, WithTimeout(100*time.Millisecond))
 	c.tokens.state = TokenState{Known: true, Left: 1200, RefillRate: 20, UpdatedAt: testNow}
 	if _, err := c.GetBestSellers(t.Context(), DomainUS, 1); err != nil {
-		t.Errorf("expected the doubled timeout to cover a 45ms response: %v", err)
+		t.Errorf("expected the doubled timeout to cover a 130ms response: %v", err)
 	}
 }
 
