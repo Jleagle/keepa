@@ -136,3 +136,33 @@ func (c *Client) waitForTokens(ctx context.Context, cost, reserve int, noWait bo
 		return nil
 	}
 }
+
+// recordEnvelope syncs the bucket with an envelope and notifies the callback.
+// It bumps the bucket generation so a queued call cancelled after this point
+// does not refund its slot against the fresh reading.
+func (c *Client) recordEnvelope(env *Envelope, path string) {
+	now := c.now()
+	c.tokens.mu.Lock()
+	s := &c.tokens.state
+	s.Known = true
+	s.Left = env.TokensLeft
+	s.RefillRate = env.RefillRate
+	s.FlowReduction = env.TokenFlowReduction
+	if now.After(s.UpdatedAt) {
+		s.UpdatedAt = now
+	}
+	c.tokens.generation++
+	c.tokens.mu.Unlock()
+
+	if c.onTokens != nil {
+		c.onTokens(TokenUpdate{
+			Left:          env.TokensLeft,
+			Consumed:      env.TokensConsumed,
+			RefillRate:    env.RefillRate,
+			RefillIn:      time.Duration(env.RefillIn) * time.Millisecond,
+			FlowReduction: env.TokenFlowReduction,
+			Path:          path,
+			Timestamp:     time.UnixMilli(env.Timestamp),
+		})
+	}
+}
