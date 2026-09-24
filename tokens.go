@@ -8,11 +8,14 @@ import (
 
 // TokenState is a snapshot of the client's view of the Keepa token bucket.
 type TokenState struct {
-	Known         bool      // false until an envelope or seed has been recorded
-	Left          int       // tokens in the bucket at UpdatedAt
-	RefillRate    int       // tokens per minute granted by the plan
-	FlowReduction float64   // tokens per minute lost to tracking subscriptions
-	UpdatedAt     time.Time // when Left was true; in the future while calls are queued
+	Known         bool    // false until an envelope or seed has been recorded
+	Left          int     // tokens in the bucket at UpdatedAt
+	RefillRate    int     // tokens per minute granted by the plan
+	FlowReduction float64 // tokens per minute lost to tracking subscriptions
+	// UpdatedAt is when Left is true. It is in the future while calls are
+	// queued, in which case Left is the balance at that slot end after the
+	// queued spends.
+	UpdatedAt time.Time
 }
 
 // NetRefillRate is the effective refill in tokens per minute, never below 1.
@@ -48,13 +51,7 @@ type tokenBucket struct {
 	mu      sync.Mutex
 	state   TokenState
 	seeding chan struct{} // non-nil while a seed is in flight; closed when it finishes
-
-	// generation counts every time the state is re-synced from the server.
-	// Nothing in this file increments it; Task 6's recordEnvelope bumps it
-	// under the lock whenever an envelope overwrites the queued timeline, so
-	// a cancelled reservation can tell whether its slot is still the one it
-	// reserved before deciding to refund it.
-	generation uint64
+	pending int           // summed cost of reservations that are still sleeping
 }
 
 // Tokens returns a snapshot of the client's view of the token bucket.
@@ -65,62 +62,66 @@ func (c *Client) Tokens() TokenState {
 }
 
 // reserveTokens applies the wait rule. It returns how long the caller must
-// wait before running (0 to run now), the bucket generation observed while
-// reserving (for a later refundTokens call), and, with noWait, a
-// *TokenWaitError instead of reserving a slot.
-func (c *Client) reserveTokens(cost, reserve int, noWait bool) (wait time.Duration, gen uint64, err error) {
+// wait before running (0 to run now) and, with noWait, a *TokenWaitError
+// instead of reserving a slot. A reservation that has to wait is counted in
+// pending until releaseTokens or refundTokens settles it.
+func (c *Client) reserveTokens(cost, reserve int, noWait bool) (time.Duration, error) {
 	c.tokens.mu.Lock()
 	defer c.tokens.mu.Unlock()
 
-	gen = c.tokens.generation
 	s := &c.tokens.state
 	if !s.Known || cost <= 0 {
-		return 0, gen, nil
+		return 0, nil
 	}
 	now := c.now()
 	projected := s.Projected(now)
 	target := float64(cost + reserve)
 	if projected >= target {
-		s.Left = int(projected) - cost
-		s.UpdatedAt = now
-		return 0, gen, nil
+		if s.UpdatedAt.After(now) {
+			s.Left -= cost // the timeline end stays where the queue put it
+		} else {
+			s.Left = int(projected) - cost
+			s.UpdatedAt = now
+		}
+		return 0, nil
 	}
-	wait = time.Duration((target - projected) / s.NetRefillRate() * float64(time.Minute))
+	wait := time.Duration((target - projected) / s.NetRefillRate() * float64(time.Minute))
 	if noWait {
-		return wait, gen, &TokenWaitError{Wait: wait, Cost: cost, Reserve: reserve, Projected: projected}
+		return wait, &TokenWaitError{Wait: wait, Cost: cost, Reserve: reserve, Projected: projected}
 	}
-	s.Left = reserve
-	s.UpdatedAt = now.Add(wait)
-	return wait, gen, nil
+	if runAt := now.Add(wait); runAt.After(s.UpdatedAt) {
+		s.Left = reserve
+		s.UpdatedAt = runAt
+	} else {
+		s.Left -= cost
+	}
+	c.tokens.pending += cost
+	return wait, nil
 }
 
-// refundTokens releases a slot whose call was cancelled before it ran. gen is
-// the generation reserveTokens observed when it reserved the slot.
-//
-// The refund is applied only if both hold at cancel time: the bucket has not
-// been re-synced from the server since the reservation (s.generation == gen)
-// and the reserved slot is still in the future (s.UpdatedAt.After(c.now())).
-// Either condition failing means the state under UpdatedAt is no longer the
-// timeline this call reserved, so nothing is refunded. A skipped refund only
-// under-spends the bucket until the next envelope corrects it; a wrong
-// refund over-credits it and risks a 429.
-func (c *Client) refundTokens(cost int, gen uint64) {
+// releaseTokens marks a sleeping reservation as committed once its wait has
+// elapsed and the request is about to be sent.
+func (c *Client) releaseTokens(cost int) {
+	c.tokens.mu.Lock()
+	c.tokens.pending -= cost
+	c.tokens.mu.Unlock()
+}
+
+// refundTokens returns a reservation whose call was cancelled before it ran.
+// The refund applies only while the slot is still in the future; once the
+// slot has passed the tokens are treated as spent.
+func (c *Client) refundTokens(cost int) {
 	c.tokens.mu.Lock()
 	defer c.tokens.mu.Unlock()
-
-	if c.tokens.generation != gen {
-		return
-	}
-	s := &c.tokens.state
-	if s.UpdatedAt.After(c.now()) {
-		refund := time.Duration(float64(cost) / s.NetRefillRate() * float64(time.Minute))
-		s.UpdatedAt = s.UpdatedAt.Add(-refund)
+	c.tokens.pending -= cost
+	if c.tokens.state.UpdatedAt.After(c.now()) {
+		c.tokens.state.Left += cost
 	}
 }
 
 // waitForTokens blocks until the bucket can pay cost while keeping reserve.
 func (c *Client) waitForTokens(ctx context.Context, cost, reserve int, noWait bool) error {
-	wait, gen, err := c.reserveTokens(cost, reserve, noWait)
+	wait, err := c.reserveTokens(cost, reserve, noWait)
 	if err != nil || wait <= 0 {
 		return err
 	}
@@ -130,28 +131,38 @@ func (c *Client) waitForTokens(ctx context.Context, cost, reserve int, noWait bo
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		c.refundTokens(cost, gen)
+		c.refundTokens(cost)
 		return ctx.Err()
 	case <-timer.C:
+		c.releaseTokens(cost)
 		return nil
 	}
 }
 
 // recordEnvelope syncs the bucket with an envelope and notifies the callback.
-// It bumps the bucket generation so a queued call cancelled after this point
-// does not refund its slot against the fresh reading.
+//
+// When calls are queued, UpdatedAt is in the future and Left is the balance
+// at that slot end after the queued spends. The server's reading does not
+// include the spends of calls still sleeping, so they are subtracted again
+// (pending) and the reading is projected forward to the slot end. One
+// approximation remains: requests already sent whose envelope has not yet
+// returned are not subtracted; the next envelope corrects it.
 func (c *Client) recordEnvelope(env *Envelope, path string) {
 	now := c.now()
 	c.tokens.mu.Lock()
 	s := &c.tokens.state
 	s.Known = true
-	s.Left = env.TokensLeft
 	s.RefillRate = env.RefillRate
 	s.FlowReduction = env.TokenFlowReduction
-	if now.After(s.UpdatedAt) {
+	if s.UpdatedAt.After(now) {
+		// Calls are queued: the server's balance does not include their
+		// spends yet, and the state describes the balance at the slot end.
+		refill := s.UpdatedAt.Sub(now).Minutes() * s.NetRefillRate()
+		s.Left = env.TokensLeft - c.tokens.pending + int(refill)
+	} else {
+		s.Left = env.TokensLeft
 		s.UpdatedAt = now
 	}
-	c.tokens.generation++
 	c.tokens.mu.Unlock()
 
 	if c.onTokens != nil {
@@ -168,34 +179,39 @@ func (c *Client) recordEnvelope(env *Envelope, path string) {
 }
 
 // seed fetches the token status once so the reserve applies to the first
-// paid call. Callers that arrive while a seed is in flight wait for it,
-// bounded by their own context; a failed seed is logged and retried on the
-// next paid call while the bucket is still unknown.
+// paid call. The first caller starts the fetch in its own goroutine, detached
+// from its cancellation, so one caller giving up does not fail the seed for
+// the others; every caller then waits for it, bounded by its own context. A
+// failed seed is logged and retried on the next paid call while the bucket
+// is still unknown.
 func (c *Client) seed(ctx context.Context) {
 	c.tokens.mu.Lock()
 	if c.tokens.state.Known {
 		c.tokens.mu.Unlock()
 		return
 	}
-	if inflight := c.tokens.seeding; inflight != nil {
-		c.tokens.mu.Unlock()
-		select {
-		case <-inflight:
-		case <-ctx.Done():
-		}
-		return
+	done := c.tokens.seeding
+	if done == nil {
+		done = make(chan struct{})
+		c.tokens.seeding = done
+		go c.runSeed(context.WithoutCancel(ctx), done)
 	}
-	done := make(chan struct{})
-	c.tokens.seeding = done
 	c.tokens.mu.Unlock()
 
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+// runSeed fetches the token status, then wakes every caller waiting on done.
+func (c *Client) runSeed(ctx context.Context, done chan struct{}) {
 	defer func() {
 		c.tokens.mu.Lock()
 		c.tokens.seeding = nil
 		c.tokens.mu.Unlock()
 		close(done)
 	}()
-
 	if _, err := c.GetTokenStatus(ctx); err != nil {
 		c.logger.Warn("keepa: token seed failed", "error", err)
 	}
