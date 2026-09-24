@@ -369,11 +369,15 @@ it with `WithReserve(n)`, so background work honours the floor while an
 interactive call passes `WithReserve(0)` and runs as long as the bucket can
 pay for it.
 
-**Seeding.** The first request on a client whose state is not `Known` first
-calls `GET /token` (cost 0), so the floor applies from the very first paid
-call. Seeding runs at most once concurrently, is retried on the next call if
-it failed, and is logged at Warn on failure. `GetTokenStatus(ctx)` is also
-public for callers who want to inspect the bucket.
+**Seeding.** The first paid request on a client whose state is not `Known`
+first calls `GET /token` (cost 0), so the floor applies from the very first
+paid call. Seeding runs at most once concurrently: callers that arrive while
+a seed is in flight wait for it to finish, bounded by their own context, so a
+burst on a fresh client cannot slip past the reserve. A failed seed is logged
+at Warn and retried on the next paid call while the bucket is still unknown.
+Requests with cost 0 never seed, which is why the status call cannot recurse.
+`GetTokenStatus(ctx)` is also public for callers who want to inspect the
+bucket.
 
 **Non-blocking mode.** `WithoutWaiting()` on any call makes step 4 return
 `*TokenWaitError` instead of sleeping, without reserving a slot. The error
