@@ -3,6 +3,7 @@ package keepa
 import (
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -330,4 +331,61 @@ func TestSeedRunsOnceUnderConcurrency(t *testing.T) {
 	if seeds != 1 {
 		t.Errorf("seeded %d times, want 1", seeds)
 	}
+}
+
+func TestSeedConcurrentCallersWaitForSeed(t *testing.T) {
+	// Ten first calls on a fresh client with a floor equal to the seeded
+	// balance: every one of them must be held back, which is only possible
+	// if the callers that did not seed waited for the seed to finish.
+	c, rec := newTestClient(t, serveJSON(200, okEnvelope("")), WithTokenReserve(1200))
+	rec.SetTokenHandler(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(30 * time.Millisecond)
+		serveJSON(200, tokenFixture)(w, r)
+	})
+	errs := make(chan error, 10)
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			_, err := probe(t.Context(), c, request{cost: 5, callParams: callParams{noWait: true}})
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if !errors.Is(err, ErrWouldWait) {
+			t.Errorf("a caller bypassed the reserve: %v", err)
+		}
+	}
+	if got := rec.Paths(); !slices.Equal(got, []string{"/token"}) {
+		t.Errorf("paths = %v, want exactly one seed and no probes", got)
+	}
+}
+
+func TestSeedWaiterHonoursOwnContext(t *testing.T) {
+	// A caller waiting on someone else's seed gives up when its own context
+	// expires rather than waiting for the seed to finish.
+	c, rec := newTestClient(t, serveJSON(200, okEnvelope("")))
+	arrived := make(chan struct{}, 1)
+	release := make(chan struct{})
+	rec.SetTokenHandler(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case arrived <- struct{}{}:
+		default:
+		}
+		<-release
+		serveJSON(200, tokenFixture)(w, r)
+	})
+	var wg sync.WaitGroup
+	wg.Go(func() { _, _ = probe(t.Context(), c, request{cost: 1}) })
+	<-arrived // the seed is now blocked inside the token handler
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	_, err := probe(ctx, c, request{cost: 1})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("waiter should fail with its own deadline, got %v", err)
+	}
+	close(release)
+	wg.Wait()
 }

@@ -47,7 +47,7 @@ type TokenUpdate struct {
 type tokenBucket struct {
 	mu      sync.Mutex
 	state   TokenState
-	seeding bool
+	seeding chan struct{} // non-nil while a seed is in flight; closed when it finishes
 
 	// generation counts every time the state is re-synced from the server.
 	// Nothing in this file increments it; Task 6's recordEnvelope bumps it
@@ -168,24 +168,35 @@ func (c *Client) recordEnvelope(env *Envelope, path string) {
 }
 
 // seed fetches the token status once so the reserve applies to the first
-// paid call. Concurrent callers do not wait for a seed already in flight; a
-// failed seed is logged and retried on the next paid call.
+// paid call. Callers that arrive while a seed is in flight wait for it,
+// bounded by their own context; a failed seed is logged and retried on the
+// next paid call while the bucket is still unknown.
 func (c *Client) seed(ctx context.Context) {
 	c.tokens.mu.Lock()
-	if c.tokens.state.Known || c.tokens.seeding {
+	if c.tokens.state.Known {
 		c.tokens.mu.Unlock()
 		return
 	}
-	c.tokens.seeding = true
+	if inflight := c.tokens.seeding; inflight != nil {
+		c.tokens.mu.Unlock()
+		select {
+		case <-inflight:
+		case <-ctx.Done():
+		}
+		return
+	}
+	done := make(chan struct{})
+	c.tokens.seeding = done
 	c.tokens.mu.Unlock()
 
-	_, err := c.GetTokenStatus(ctx)
+	defer func() {
+		c.tokens.mu.Lock()
+		c.tokens.seeding = nil
+		c.tokens.mu.Unlock()
+		close(done)
+	}()
 
-	c.tokens.mu.Lock()
-	c.tokens.seeding = false
-	c.tokens.mu.Unlock()
-
-	if err != nil {
+	if _, err := c.GetTokenStatus(ctx); err != nil {
 		c.logger.Warn("keepa: token seed failed", "error", err)
 	}
 }
