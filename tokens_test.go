@@ -3,7 +3,9 @@ package keepa
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -219,5 +221,113 @@ func TestWaitForTokensNoWaitDoesNotLog(t *testing.T) {
 	}
 	if logs.Len() != 0 {
 		t.Errorf("non-blocking mode logged: %s", logs.String())
+	}
+}
+
+func TestSeedRunsBeforeFirstPaidCallOnly(t *testing.T) {
+	c, rec := newTestClient(t, serveJSON(200, okEnvelope("")))
+	for range 2 {
+		if _, err := probe(t.Context(), c, request{cost: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := rec.Paths(); !slices.Equal(got, []string{"/token", "/probe", "/probe"}) {
+		t.Errorf("paths = %v, want one seed then two probes", got)
+	}
+}
+
+func TestSeedAppliesReserveToFirstCall(t *testing.T) {
+	// The fixture reports 1200 tokens. With a floor of 1200 the very first
+	// paid call is already held back, and no probe reaches the server.
+	c, rec := newTestClient(t, serveJSON(200, okEnvelope("")), WithTokenReserve(1200))
+	_, err := probe(t.Context(), c, request{cost: 5, callParams: callParams{noWait: true}})
+	if !errors.Is(err, ErrWouldWait) {
+		t.Fatalf("err = %v, want ErrWouldWait", err)
+	}
+	if got := costOf(t, err); got != 5 {
+		t.Errorf("cost = %d, want 5", got)
+	}
+	if got := rec.Paths(); !slices.Equal(got, []string{"/token"}) {
+		t.Errorf("paths = %v, want only the seed", got)
+	}
+}
+
+func TestSeedFailureIsLoggedAndIgnored(t *testing.T) {
+	logger, logs := captureLogs()
+	c, rec := newTestClient(t, serveJSON(200, okEnvelope("")), WithLogger(logger))
+	rec.SetTokenHandler(serveJSON(500, "boom"))
+	if _, err := probe(t.Context(), c, request{cost: 1}); err != nil {
+		t.Fatalf("the paid call must proceed when the seed fails: %v", err)
+	}
+	if !strings.Contains(logs.String(), "keepa: token seed failed") {
+		t.Errorf("seed failure not logged: %s", logs.String())
+	}
+	// The probe's envelope synced the bucket, so no further seed is needed.
+	if _, err := probe(t.Context(), c, request{cost: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.Paths(); !slices.Equal(got, []string{"/token", "/probe", "/probe"}) {
+		t.Errorf("paths = %v", got)
+	}
+}
+
+func TestSeedRetriesWhileStateUnknown(t *testing.T) {
+	c, rec := newTestClient(t, serveJSON(502, `{"message":"down"}`))
+	rec.SetTokenHandler(serveJSON(500, "boom"))
+	for range 2 {
+		_, _ = probe(t.Context(), c, request{cost: 1})
+	}
+	if got := rec.Paths(); !slices.Equal(got, []string{"/token", "/probe", "/token", "/probe"}) {
+		t.Errorf("paths = %v, want a seed attempt before each call while unknown", got)
+	}
+}
+
+func TestSeedDoesNotRecurse(t *testing.T) {
+	// GetTokenStatus costs nothing, so it never triggers a seed of its own.
+	c, rec := newTestClient(t, serveJSON(200, okEnvelope("")))
+	res, err := c.GetTokenStatus(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TokensLeft != 1200 || res.RefillRate != 20 {
+		t.Errorf("TokenResponse = %+v", res.Envelope)
+	}
+	if got := rec.Paths(); !slices.Equal(got, []string{"/token"}) {
+		t.Errorf("paths = %v, want exactly one /token", got)
+	}
+	if s := c.Tokens(); !s.Known || s.Left != 1200 || s.RefillRate != 20 {
+		t.Errorf("bucket = %+v", s)
+	}
+	if got := rec.Calls()[0].query.Get("key"); got != "test-key" {
+		t.Errorf("key = %q", got)
+	}
+}
+
+func TestSeedBypassesReserve(t *testing.T) {
+	// The free status call goes through even when the bucket is below the floor.
+	c, _ := newTestClient(t, serveJSON(200, okEnvelope("")), WithTokenReserve(5000))
+	if _, err := c.GetTokenStatus(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := probe(t.Context(), c, request{cost: 1, callParams: callParams{noWait: true}}); !errors.Is(err, ErrWouldWait) {
+		t.Errorf("a paid call should be held by the floor: %v", err)
+	}
+}
+
+func TestSeedRunsOnceUnderConcurrency(t *testing.T) {
+	c, rec := newTestClient(t, serveJSON(200, okEnvelope("")))
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() { _, _ = probe(t.Context(), c, request{cost: 1}) })
+	}
+	wg.Wait()
+	seeds := 0
+	for _, p := range rec.Paths() {
+		if p == "/token" {
+			seeds++
+		}
+	}
+	if seeds != 1 {
+		t.Errorf("seeded %d times, want 1", seeds)
 	}
 }

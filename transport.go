@@ -46,6 +46,10 @@ func (c *Client) query() url.Values {
 
 // do executes r and decodes the body into T.
 func do[T any](ctx context.Context, c *Client, r request) (*T, error) {
+	if r.cost > 0 {
+		c.seed(ctx)
+	}
+
 	if c.limiter != nil {
 		if err := c.limiter.Wait(ctx); err != nil {
 			return nil, err

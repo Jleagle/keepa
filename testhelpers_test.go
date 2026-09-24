@@ -2,6 +2,7 @@ package keepa
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -125,4 +126,17 @@ func serveFixture(t *testing.T, name string) http.HandlerFunc {
 		t.Fatal(err)
 	}
 	return serveJSON(http.StatusOK, string(body))
+}
+
+// costOf returns the token cost the client computed for a call made with
+// WithReserve(1200) and WithoutWaiting(): the seeded bucket holds exactly
+// 1200, so any positive cost forces a *TokenWaitError that carries it, and
+// no request reaches the endpoint.
+func costOf(t *testing.T, err error) int {
+	t.Helper()
+	werr, ok := errors.AsType[*TokenWaitError](err)
+	if !ok {
+		t.Fatalf("expected *TokenWaitError, got %T: %v", err, err)
+	}
+	return werr.Cost
 }

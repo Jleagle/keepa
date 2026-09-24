@@ -166,3 +166,37 @@ func (c *Client) recordEnvelope(env *Envelope, path string) {
 		})
 	}
 }
+
+// seed fetches the token status once so the reserve applies to the first
+// paid call. Concurrent callers do not wait for a seed already in flight; a
+// failed seed is logged and retried on the next paid call.
+func (c *Client) seed(ctx context.Context) {
+	c.tokens.mu.Lock()
+	if c.tokens.state.Known || c.tokens.seeding {
+		c.tokens.mu.Unlock()
+		return
+	}
+	c.tokens.seeding = true
+	c.tokens.mu.Unlock()
+
+	_, err := c.GetTokenStatus(ctx)
+
+	c.tokens.mu.Lock()
+	c.tokens.seeding = false
+	c.tokens.mu.Unlock()
+
+	if err != nil {
+		c.logger.Warn("keepa: token seed failed", "error", err)
+	}
+}
+
+// TokenResponse is returned by GetTokenStatus. Only the Envelope is populated.
+type TokenResponse struct {
+	Envelope
+}
+
+// GetTokenStatus retrieves the token bucket state. Cost: 0 tokens, so it is
+// never held back by the reserve.
+func (c *Client) GetTokenStatus(ctx context.Context) (*TokenResponse, error) {
+	return do[TokenResponse](ctx, c, request{path: "/token", query: c.query(), cost: 0})
+}
