@@ -1,0 +1,33 @@
+{
+  "timestamp": 1790277678673,
+  "tokensLeft": 1199,
+  "tokensConsumed": 1,
+  "refillIn": 30000,
+  "refillRate": 20,
+  "tokenFlowReduction": 0,
+  "processingTimeInMs": 3,
+  "categories": {
+    "172282": {
+      "catId": 172282,
+      "name": "Electronics",
+      "parent": 0,
+      "children": [502394],
+      "domainId": 1,
+      "productCount": 123456,
+      "isBrowseNode": true,
+      "contextFreeName": "Electronics",
+      "websiteDisplayGroup": "ce_display_on_website",
+      "avgRating": 42,
+      "isFBAPercent": 55.5,
+      "topBrands": ["Acme", "Globex"]
+    },
+    "502394": {
+      "catId": 502394,
+      "name": "Camera & Photo",
+      "parent": 172282,
+      "children": [],
+      "domainId": 1
+    }
+  },
+  "categoryParents": {}
+}
