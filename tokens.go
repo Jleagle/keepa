@@ -62,10 +62,11 @@ func (c *Client) Tokens() TokenState {
 }
 
 // reserveTokens applies the wait rule. It returns how long the caller must
-// wait before running (0 to run now) and, with noWait, a *TokenWaitError
-// instead of reserving a slot. A reservation that has to wait is counted in
+// wait before running (0 to run now). With noWait, or when the wait would
+// outlive a non-zero deadline, it returns a *TokenWaitError instead of
+// reserving a slot. A reservation that has to wait is counted in
 // pending until releaseTokens or refundTokens settles it.
-func (c *Client) reserveTokens(cost, reserve int, noWait bool) (time.Duration, error) {
+func (c *Client) reserveTokens(cost, reserve int, noWait bool, deadline time.Time) (time.Duration, error) {
 	c.tokens.mu.Lock()
 	defer c.tokens.mu.Unlock()
 
@@ -86,7 +87,9 @@ func (c *Client) reserveTokens(cost, reserve int, noWait bool) (time.Duration, e
 		return 0, nil
 	}
 	wait := time.Duration((target - projected) / s.NetRefillRate() * float64(time.Minute))
-	if noWait {
+	if noWait || (!deadline.IsZero() && now.Add(wait).After(deadline)) {
+		// Either the caller opted out of waiting, or the wait would outlive
+		// its deadline; sleeping until then would only hold the caller up.
 		return wait, &TokenWaitError{Wait: wait, Cost: cost, Reserve: reserve, Projected: projected}
 	}
 	if runAt := now.Add(wait); runAt.After(s.UpdatedAt) {
@@ -120,8 +123,11 @@ func (c *Client) refundTokens(cost int) {
 }
 
 // waitForTokens blocks until the bucket can pay cost while keeping reserve.
+// A wait that would outlive the context's deadline fails at once with a
+// *TokenWaitError instead of sleeping until the deadline expires.
 func (c *Client) waitForTokens(ctx context.Context, cost, reserve int, noWait bool) error {
-	wait, err := c.reserveTokens(cost, reserve, noWait)
+	deadline, _ := ctx.Deadline()
+	wait, err := c.reserveTokens(cost, reserve, noWait, deadline)
 	if err != nil || wait <= 0 {
 		return err
 	}

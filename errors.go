@@ -12,7 +12,8 @@ var (
 	ErrInvalidRequest = errors.New("keepa: invalid request")
 	// ErrNotEnoughTokens matches an *APIError carried by an HTTP 429 response.
 	ErrNotEnoughTokens = errors.New("keepa: not enough tokens")
-	// ErrWouldWait matches a *TokenWaitError from a call made WithoutWaiting.
+	// ErrWouldWait matches a *TokenWaitError: the call was made WithoutWaiting,
+	// or its token wait would outlive the context's deadline.
 	ErrWouldWait = errors.New("keepa: call would wait for tokens")
 )
 
@@ -47,9 +48,10 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("keepa: HTTP %d: %s", e.StatusCode, truncate(e.Body, 200))
 }
 
-// TokenWaitError is returned by a call made WithoutWaiting when the bucket
-// cannot pay for it without dropping below the reserve. Wait is how long the
-// client would have slept.
+// TokenWaitError is returned when the bucket cannot pay for a call without
+// dropping below the reserve and the client will not sleep for it: either the
+// call was made WithoutWaiting, or the wait would outlive the context's
+// deadline. Wait is how long the client would have slept.
 type TokenWaitError struct {
 	Wait      time.Duration
 	Cost      int

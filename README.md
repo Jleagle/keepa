@@ -87,7 +87,9 @@ until the surplus is spent. Concurrent callers queue on a shared timeline.
   floor and interactive calls `WithReserve(0)`.
 - `WithoutWaiting()` on a call returns a `*TokenWaitError` (matching
   `ErrWouldWait`) with the wait it would have performed, so a queue consumer
-  can re-queue instead of blocking.
+  can re-queue instead of blocking. The same error comes back immediately
+  when the wait would outlive your context's deadline, so a short deadline
+  never holds a worker for its full length only to fail.
 - The first paid call fetches `GetTokenStatus` (free) so the floor applies
   immediately. `client.Tokens()` returns a snapshot of the bucket;
   `Tokens().Projected(time.Now())` is the current estimate.
