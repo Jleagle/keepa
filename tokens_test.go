@@ -342,6 +342,38 @@ func TestWaitForTokensWithinDeadlineSleeps(t *testing.T) {
 	}
 }
 
+// WithMaxTokenWait bounds the wait even when the context has no deadline,
+// and the tighter of the two bounds wins.
+func TestWaitForTokensHonoursMaxTokenWait(t *testing.T) {
+	now := time.Now()
+	c := bucketClient(TokenState{Known: true, Left: 0, RefillRate: 20, UpdatedAt: now}, WithMaxTokenWait(time.Minute))
+	c.now = func() time.Time { return now }
+
+	err := c.waitForTokens(t.Context(), 3, 20, false) // 69 seconds, no context deadline
+	if !errors.Is(err, ErrWouldWait) {
+		t.Fatalf("err = %v, want ErrWouldWait from the client cap", err)
+	}
+	c.tokens.mu.Lock()
+	pending := c.tokens.pending
+	c.tokens.mu.Unlock()
+	if pending != 0 {
+		t.Errorf("pending = %d after a capped wait, want 0", pending)
+	}
+
+	// A generous context deadline does not loosen the cap.
+	ctx, cancel := context.WithDeadline(t.Context(), now.Add(time.Hour))
+	defer cancel()
+	if err := c.waitForTokens(ctx, 3, 20, false); !errors.Is(err, ErrWouldWait) {
+		t.Errorf("err = %v, want ErrWouldWait: the client cap is tighter than the context", err)
+	}
+
+	// A wait inside the cap proceeds.
+	c.tokens.state = TokenState{Known: true, Left: 19, RefillRate: 6000, UpdatedAt: now} // 20ms
+	if err := c.waitForTokens(t.Context(), 1, 20, false); err != nil {
+		t.Errorf("a wait inside the cap must succeed: %v", err)
+	}
+}
+
 func TestWaitForTokensNoWaitDoesNotLog(t *testing.T) {
 	logger, logs := captureLogs()
 	c := bucketClient(TokenState{Known: true, Left: 0, RefillRate: 1, UpdatedAt: testNow}, WithLogger(logger))

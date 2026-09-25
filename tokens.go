@@ -123,10 +123,15 @@ func (c *Client) refundTokens(cost int) {
 }
 
 // waitForTokens blocks until the bucket can pay cost while keeping reserve.
-// A wait that would outlive the context's deadline fails at once with a
-// *TokenWaitError instead of sleeping until the deadline expires.
+// A wait that would outlive the context's deadline, or the client's maximum
+// token wait, fails at once with a *TokenWaitError instead of sleeping.
 func (c *Client) waitForTokens(ctx context.Context, cost, reserve int, noWait bool) error {
 	deadline, _ := ctx.Deadline()
+	if c.maxWait > 0 {
+		if capped := c.now().Add(c.maxWait); deadline.IsZero() || capped.Before(deadline) {
+			deadline = capped
+		}
+	}
 	wait, err := c.reserveTokens(cost, reserve, noWait, deadline)
 	if err != nil || wait <= 0 {
 		return err

@@ -66,6 +66,7 @@ func TestNewClientOptions(t *testing.T) {
 		WithTokenCallback(func(TokenUpdate) { called = true }),
 		WithTokenReserve(1000),
 		WithTimeout(5*time.Second),
+		WithMaxTokenWait(30*time.Minute),
 	)
 	if c.httpClient != hc {
 		t.Error("WithHTTPClient not applied")
@@ -84,6 +85,9 @@ func TestNewClientOptions(t *testing.T) {
 	}
 	if c.timeout != 5*time.Second {
 		t.Errorf("timeout = %v, want 5s", c.timeout)
+	}
+	if c.maxWait != 30*time.Minute {
+		t.Errorf("maxWait = %v, want 30m", c.maxWait)
 	}
 	c.onTokens(TokenUpdate{})
 	if !called {

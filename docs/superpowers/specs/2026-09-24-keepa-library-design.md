@@ -116,6 +116,7 @@ The API key is required, so it is a parameter. `NewClient` never fails.
 | `WithLogger(*slog.Logger)` | `slog.New(slog.DiscardHandler)` | Receives the events listed in section 9 |
 | `WithTokenCallback(func(TokenUpdate))` | none | Called once per Keepa envelope received, including error envelopes |
 | `WithTokenReserve(int)` | 20 | Tokens to keep in hand; the floor |
+| `WithMaxTokenWait(time.Duration)` | none | Caps the token wait; a longer wait fails at once with `*TokenWaitError`, the tighter of this and the context deadline wins |
 | `WithTimeout(time.Duration)` | 60s | Fallback per-request deadline when the caller's context has none; zero or negative disables the fallback, as Go convention expects |
 
 ```go

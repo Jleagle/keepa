@@ -30,6 +30,7 @@ type Client struct {
 	onTokens   func(TokenUpdate)
 	reserve    int
 	timeout    time.Duration
+	maxWait    time.Duration
 	now        func() time.Time
 
 	tokens tokenBucket
@@ -66,6 +67,13 @@ func WithTokenReserve(n int) Option { return func(c *Client) { c.reserve = n } }
 // value disables the fallback, leaving requests bounded only by the caller's
 // context and the HTTP client.
 func WithTimeout(d time.Duration) Option { return func(c *Client) { c.timeout = d } }
+
+// WithMaxTokenWait caps how long a call may wait for tokens. A call whose
+// wait would exceed d fails at once with a *TokenWaitError, exactly as if it
+// had been made WithoutWaiting, so a queue consumer is never parked for
+// longer than it is prepared to be. Zero, the default, means the only bound
+// is the caller's context.
+func WithMaxTokenWait(d time.Duration) Option { return func(c *Client) { c.maxWait = d } }
 
 // NewClient returns a client for the given API key.
 func NewClient(apiKey string, opts ...Option) *Client {

@@ -69,6 +69,7 @@ except `parents` and `page`, which Keepa requires and are always sent.
 | `WithLogger(*slog.Logger)` | discard |
 | `WithTokenCallback(func(TokenUpdate))` | none; called for every Keepa envelope, including errors |
 | `WithTokenReserve(int)` | 20 |
+| `WithMaxTokenWait(time.Duration)` | none; a call whose token wait would exceed it fails at once with `*TokenWaitError` |
 | `WithTimeout(time.Duration)` | 1 minute, applied only when your context has no deadline; 0 disables it |
 
 ## Token accounting
