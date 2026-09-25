@@ -400,7 +400,9 @@ bucket.
 **Non-blocking mode.** `WithoutWaiting()` on any call makes step 4 return
 `*TokenWaitError` instead of sleeping, without reserving a slot. The error
 carries the wait the client would have performed, so a queue consumer can
-re-queue with that delay.
+re-queue with that delay. The same error is returned at once, again without
+reserving, when the computed wait would outlive the caller's context
+deadline; sleeping until the deadline would only hold the caller up.
 
 **Callback.** The token callback runs synchronously on the goroutine that
 made the request, so it should return quickly.
@@ -511,7 +513,7 @@ func (c *Client) GetProducts(ctx context.Context, domain Domain, asins []string,
 
 | Option | Query sent | Extra cost per ASIN |
 |---|---|---|
-| `WithStats(since time.Time)` | `stats=<sinceMs>,<nowMs>`; `since` earlier than 2011-01-01 is clamped to it | 0 |
+| `WithStats(since time.Time)` | `stats=<sinceMs>,<nowMs>`; `since` earlier than 2011-01-01 is clamped to it, and `since` later than five minutes ago is pushed back to five minutes ago because Keepa truncates both timestamps to whole minutes and rejects a window that does not span a minute boundary | 0 |
 | `WithRatings()` | `rating=1` | 1 |
 | `WithLiveUpdate()` | `update=0` | 1 (Keepa may charge 0 if data is fresh) |
 | `WithBuyBox()` | `buybox=1` | 2 |

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,6 +42,8 @@ func TestGetProductsOptions(t *testing.T) {
 		{"stats", []ProductOption{WithStats(since)}, map[string]string{"stats": "1767225600000,1790251200000"}},
 		{"stats clamped to 2011", []ProductOption{WithStats(time.Date(2005, 1, 1, 0, 0, 0, 0, time.UTC))}, map[string]string{"stats": "1293840000000,1790251200000"}},
 		{"stats zero time clamped", []ProductOption{WithStats(time.Time{})}, map[string]string{"stats": "1293840000000,1790251200000"}},
+		{"stats within the last minute pushed back", []ProductOption{WithStats(testNow.Add(-time.Second))}, map[string]string{"stats": "1790250900000,1790251200000"}},
+		{"stats in the future pushed back", []ProductOption{WithStats(testNow.Add(time.Hour))}, map[string]string{"stats": "1790250900000,1790251200000"}},
 		{"ratings", []ProductOption{WithRatings()}, map[string]string{"rating": "1"}},
 		{"live update", []ProductOption{WithLiveUpdate()}, map[string]string{"update": "0"}},
 		{"buy box", []ProductOption{WithBuyBox()}, map[string]string{"buybox": "1"}},
@@ -181,6 +185,46 @@ func TestGetProductsDecodes(t *testing.T) {
 	if !slices.Equal(back.CSV.Amazon, p.CSV.Amazon) || back.Stats == nil || !slices.Equal(back.Stats.Current, p.Stats.Current) {
 		t.Errorf("round trip: amazon=%v stats=%+v", back.CSV.Amazon, back.Stats)
 	}
+}
+
+// Keepa truncates both stats timestamps to whole minutes and rejects the
+// request with "stat parameter invalid" unless the start minute is strictly
+// before the end minute. A since inside the current minute, at its start, or
+// in the future must be pushed back so the window spans a minute boundary.
+func TestGetProductsStatsWindowSpansAMinute(t *testing.T) {
+	for name, since := range map[string]time.Time{
+		"now":             testNow,
+		"seconds ago":     testNow.Add(-time.Second),
+		"start of minute": testNow.Truncate(time.Minute),
+		"in the future":   testNow.Add(time.Hour),
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, rec := newTestClient(t, serveJSON(200, okEnvelope(`"products":[]`)))
+			if _, err := c.GetProducts(t.Context(), DomainUS, []string{"B07XJ8C8F5"}, WithStats(since)); err != nil {
+				t.Fatal(err)
+			}
+			start, end := parseStatsParam(t, rec.Last(t).query.Get("stats"))
+			if start/60000 >= end/60000 {
+				t.Errorf("stats window %d,%d does not span a minute boundary; Keepa rejects it", start, end)
+			}
+		})
+	}
+}
+
+func parseStatsParam(t *testing.T, stats string) (start, end int64) {
+	t.Helper()
+	var err error
+	before, after, ok := strings.Cut(stats, ",")
+	if !ok {
+		t.Fatalf("stats param %q is not a start,end pair", stats)
+	}
+	if start, err = strconv.ParseInt(before, 10, 64); err != nil {
+		t.Fatalf("stats start %q: %v", before, err)
+	}
+	if end, err = strconv.ParseInt(after, 10, 64); err != nil {
+		t.Fatalf("stats end %q: %v", after, err)
+	}
+	return start, end
 }
 
 func TestProductLastCategoryEmpty(t *testing.T) {

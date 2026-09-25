@@ -10,8 +10,18 @@ import (
 // keepaStart is the earliest date Keepa holds data for. WithStats clamps to it.
 var keepaStart = time.Date(2011, 1, 1, 0, 0, 0, 0, time.UTC)
 
+// minStatsWindow is the shortest stats interval sent to Keepa. Keepa truncates
+// both stats timestamps to whole minutes and rejects the request with "stat
+// parameter invalid" unless the start minute is strictly before the end
+// minute, so a start inside the current minute, or in the future, is pushed
+// back this far.
+const minStatsWindow = 5 * time.Minute
+
 // WithStats requests the statistics object computed over the interval from
-// since until now. Dates before 2011 are clamped to 2011-01-01. No extra tokens.
+// since until now. Dates before 2011 are clamped to 2011-01-01, and a since
+// within the last five minutes, or in the future, is pushed back to five
+// minutes ago so the window spans the minute boundary Keepa requires. No
+// extra tokens.
 func WithStats(since time.Time) ProductOption {
 	return productOption(func(p *productParams) { p.stats = &since })
 }
@@ -62,11 +72,15 @@ func (c *Client) GetProducts(ctx context.Context, domain Domain, asins []string,
 	q.Set("asin", strings.Join(asins, ","))
 	perASIN := 1
 	if p.stats != nil {
+		now := c.now()
 		since := *p.stats
 		if since.Before(keepaStart) {
 			since = keepaStart
 		}
-		q.Set("stats", strconv.FormatInt(since.UnixMilli(), 10)+","+strconv.FormatInt(c.now().UnixMilli(), 10))
+		if latest := now.Add(-minStatsWindow); since.After(latest) {
+			since = latest
+		}
+		q.Set("stats", strconv.FormatInt(since.UnixMilli(), 10)+","+strconv.FormatInt(now.UnixMilli(), 10))
 	}
 	if p.ratings {
 		q.Set("rating", "1")
